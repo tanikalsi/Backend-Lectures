@@ -1,0 +1,96 @@
+CJS loads modules synchronously and resolves them as they’re executed, which can lead to partially initialized modules in a circular dependency.
+Code Example
+spatula.js:
+console.log("Spatula: Starting");
+const chef = require('./chef');
+console.log("Spatula: Got chef", chef);
+module.exports = { flip: () => "Flip!" };
+
+chef.js:
+console.log("Chef: Starting");
+const spatula = require('./spatula');
+console.log("Chef: Got spatula", spatula);
+module.exports = { cook: () => "Cooking!" };
+
+main.js:
+const spatula = require('./spatula');
+const chef = require('./chef');
+console.log(spatula.flip(), chef.cook());
+
+What Happens?
+Run node main.js, and you’ll see something like:
+Spatula: Starting
+Chef: Starting
+Chef: Got spatula {}
+Spatula: Got chef { cook: [Function: cook] }
+Flip! Cooking!
+Circular Dependencies in ES Modules (ESM)
+ESM is stricter and loads modules asynchronously with a static structure, which makes circular dependencies trickier but safer. ESM resolves bindings “live,” so you can access exports later without getting undefined (usually).
+
+Code Example
+spatula.js:
+console.log("Spatula: Starting");
+import { cook } from './chef.js';
+console.log("Spatula: Got cook", cook);
+export const flip = () => "Flip!";
+
+chef.js:
+console.log("Chef: Starting");
+import { flip } from './spatula.js';
+console.log("Chef: Got flip", flip);
+export const cook = () => "Cooking!";
+
+main.js:
+import { flip } from './spatula.js';
+import { cook } from './chef.js';
+console.log(flip(), cook());
+package.json (needed for ESM):
+json
+
+
+{ "type": "module" }
+What Happens?
+Run node main.js, and you’ll see:
+
+Spatula: Starting
+Chef: Starting
+Chef: Got flip [Function: flip]
+Spatula: Got cook [Function: cook]
+Flip! Cooking!
+Why? ESM creates a “module record” before executing code. Imports are bindings, not values, so flip and cook are available as soon as they’re exported, even in a circular dependency. ESM’s static analysis ensures the module graph is resolved before execution, avoiding CJS’s “empty object” issue.
+Problem: If you try to execute a function during module loading (e.g., call flip() in chef.js’s top-level code), you might hit a ReferenceError because ESM evaluates top-level code before all exports are fully bound.
+
+// chef.js (broken)
+import { flip } from './spatula.js';
+console.log(flip()); // Error: flip is not yet initialized
+export const cook = () => "Cooking!";
+This throws a ReferenceError due to ESM’s Temporal Dead Zone (TDZ) for imports.
+Workaround: Move circular logic into functions or use dynamic import() to break the cycle.
+
+// chef.js (fixed)
+import { flip } from './spatula.js';
+export const cook = () => flip() + " Cooking!";
+How to Avoid Circular Dependencies
+Refactor: Break the cycle by moving shared code to a third module.
+
+// utils.js (ESM)
+export const flip = () => "Flip!";
+export const cook = () => "Cooking!";
+Then spatula.js and chef.js import from utils.js without looping.
+Dynamic Imports: Use import() in ESM to load modules on demand.
+
+// chef.js (ESM)
+export async function cook() {
+  const { flip } = await import('./spatula.js');
+  return flip() + " Cooking!";
+}
+Lazy Evaluation: In CJS, wrap logic in functions to delay execution.
+
+// chef.js (CJS)
+const spatula = require('./spatula');
+module.exports = { cook: () => spatula.flip() + " Cooking!" };
+
+Fun Takeaway
+CJS is like two chefs tossing a half-cooked pancake back and forth—sometimes you get an underdone result. ESM is like a
+ choreographed dance where both chefs know their moves but trip if they step too early. 
+Both can work, but ESM’s stricter rules make it more predictable for modern apps.
